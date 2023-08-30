@@ -8,12 +8,13 @@
 #include <stdlib.h>
 
 int arg2int(const char* arg);
+float arg2float(const char* arg);
 std::fstream tryOpenFile(const char* fileName);
 
 int main( int argc, char** argv )
 {
     std::fstream fin;
-    std::fstream fout;
+    std::ofstream fout;
     int goalSigma;
     int width;
     int height;
@@ -25,7 +26,7 @@ int main( int argc, char** argv )
         }
         fin = tryOpenFile(argv[1]);
         fout.open(argv[2]);
-        goalSigma = arg2int(argv[3]);
+        goalSigma = arg2float(argv[3]);
         width = arg2int(argv[4]);
         height = arg2int(argv[5]);
         numFrames = arg2int(argv[6]);
@@ -40,16 +41,21 @@ int main( int argc, char** argv )
     char* yFrame = new char[width * height];
     char* uvFrame = new char[width * height / 4];
 
-    cv::Mat_<double> kernel(3, 3);
-    //old school
-    // kernel <<  0.0232376856854350,  0.0224667770886383, 0.00126609507256231,
-    //            0.0253961698437219, -0.00569499178547407, 0.159828992626180,
-    //            -0.0126038382871265, 0.254263306400884,  1;
+    int lag = 2;
+    cv::Mat_<double> kernel(((lag+1)*(lag+1)) + (lag*lag) -1, 1);
 
-    //grain off youtube
-    kernel <<   0.0412877726147980, -0.0160599827082709, -0.142365961087186,
-                0.0134909027281112, -0.260534163652160,  0.698540136126559,
-                -0.131609214173857, 0.556044445343399;
+    kernel <<   0.0408973753375396,
+                -0.0249732630696668,
+                -0.0469093590367031,
+                -0.00183072425932764,
+                0.00884455096177940,
+                0.346663128842722,
+                -0.0625607468970479,
+                0.325104219351192,
+                -0.0441798187985132,
+                0.0990816397226081,
+                0.0200728890185384,
+                0.00289972718613776;
 
     cv::Mat grain(height, width, CV_64F);
     cv::Mat out;
@@ -57,31 +63,60 @@ int main( int argc, char** argv )
         fin.read(yFrame, width * height);
 
         cv::Mat mtx(height, width, CV_8U, yFrame);
-        // cv::randn(grain, 0, sqrt(61.65));
-        cv::randn(grain, 0, sqrt(0.41));
-        for(int y = 2; y<height;++y){
-            for(int x = 2; x<width;++x){
-                grain.at<double>(y, x) =  
-                (grain.at<double>(y-2, x-2) * kernel(0, 0)) +
-                (grain.at<double>(y-2, x-1) * kernel(0, 1)) +
-                (grain.at<double>(y-2, x  ) * kernel(0,  2)) +
-                (grain.at<double>(y-1, x-2) * kernel(1, 0)) +
-                (grain.at<double>(y-1, x-1) * kernel(1, 1)) +
-                (grain.at<double>(y-1, x  ) * kernel(1, 2)) +
-                (grain.at<double>(y  , x-2) * kernel(2, 0)) +
-                (grain.at<double>(y  , x-1) * kernel(2, 1)) +
-                grain.at<double>(y, x);
+        cv::randn(grain, 0, sqrt(0.38));
+
+        for(int x = lag + 1; x<width-(lag+1);++x){
+            for(int y = lag + 1; y<height;++y){
+                double pixel = grain.at<double>(y, x);
+                int j = 0;
+
+                for (int xLag = -lag; xLag<=-1;xLag++){
+                    for(int yLag = -lag; yLag<=0;yLag++){
+                        pixel += (grain.at<double>(y+yLag, x+xLag) * kernel(j, 0));
+                        j++;
+                    }
+                }
+                
+                for (int xLag = 0; xLag<=lag;xLag++){
+                    for(int yLag = -lag; yLag<=-1;yLag++){
+                        pixel += (grain.at<double>(y+yLag, x+xLag) * kernel(j, 0));
+                        j++;
+                    }
+                }
+                grain.at<double>(y, x) = pixel;
+            }
+        }
+
+        double minVal; 
+        double maxVal; 
+        cv::Point minLoc; 
+        cv::Point maxLoc;
+
+        minMaxLoc(grain, &minVal, &maxVal, &minLoc, &maxLoc);
+
+        double step  = 2.0 / 5.0;
+        for(int x = 0; x<width;++x){
+            for(int y = 0; y<height;++y){
+                int numSteps = grain.at<double>(y,x) / step;
+                grain.at<double>(y,x) = (double)numSteps * step;
             }
         }
 
         cv::Scalar mean, stddev;
 
         cv::meanStdDev(grain, mean, stddev);
+        grain = grain - mean;
         grain = (grain / stddev) * goalSigma;
+
+
 
         mtx.convertTo(out, CV_64F);
         out = out + grain;
         out.convertTo(mtx, CV_8U);
+
+        // grain = grain + 128;
+        // grain.convert(mtx, CV_8U);
+
 
         char* y = reinterpret_cast<char*>(mtx.data);
 
@@ -94,8 +129,8 @@ int main( int argc, char** argv )
         fout.write(uvFrame, 1280 * 720 / 4);
     }
 
-    delete yFrame;
-    delete uvFrame;
+    delete[] yFrame;
+    delete[] uvFrame;
 
     fin.close();
     fout.close();
@@ -107,6 +142,17 @@ int main( int argc, char** argv )
 int arg2int(const char* arg){
     std::istringstream ss(arg);
     int x;
+    if (!(ss >> x)) {
+        throw std::invalid_argument("Invalid number: " + std::string(arg));
+    } else if (!ss.eof()) {
+        throw std::invalid_argument("Trailing characters after number: " + std::string(arg));
+    }
+    return x;
+}
+
+float arg2float(const char* arg){
+    std::istringstream ss(arg);
+    float x;
     if (!(ss >> x)) {
         throw std::invalid_argument("Invalid number: " + std::string(arg));
     } else if (!ss.eof()) {
