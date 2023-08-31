@@ -22,7 +22,7 @@ int main( int argc, char** argv )
 
     try{
         if(argc<7) {
-            throw std::invalid_argument("Not enough input arguments.\nUsage: ./arFilter [input file] [output file] [sigma] [width] [height] [numFrames]");
+            throw std::invalid_argument("Not enough input arguments.\nUsage: ./filmGrainAdder [input file] [output file] [sigma] [width] [height] [numFrames]");
         }
         fin = tryOpenFile(argv[1]);
         fout.open(argv[2]);
@@ -92,7 +92,7 @@ int main( int argc, char** argv )
         cv::Point minLoc; 
         cv::Point maxLoc;
 
-        minMaxLoc(grain, &minVal, &maxVal, &minLoc, &maxLoc);
+        cv::minMaxLoc(grain, &minVal, &maxVal, &minLoc, &maxLoc);
 
         double step  = 2.0 / 5.0;
         for(int x = 0; x<width;++x){
@@ -109,14 +109,9 @@ int main( int argc, char** argv )
         grain = (grain / stddev) * goalSigma;
 
 
-
         mtx.convertTo(out, CV_64F);
         out = out + grain;
         out.convertTo(mtx, CV_8U);
-
-        // grain = grain + 128;
-        // grain.convert(mtx, CV_8U);
-
 
         char* y = reinterpret_cast<char*>(mtx.data);
 
